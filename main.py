@@ -1,406 +1,454 @@
 """
-Smart Attendance System - Phase 1: Face Detection Module
-Developed during Vocational Training at OLF
-Enhanced Professional Version with Stable Face Recognition
+Smart Attendance System - Phase 2: OpenCV-Based Version
+Uses OpenCV's built-in face detection for maximum compatibility
 """
 
-import cv2
-import face_recognition
 import os
+import datetime
+import pickle
+import cv2
 import numpy as np
-import time
-import argparse
-import sys
 from datetime import datetime
+import time
 
 
-class ProfessionalFaceRecognition:
-    def __init__(self, camera_index=0):
-        self.known_face_encodings = []
-        self.known_face_names = []
-        self.camera_index = camera_index
-        self.previous_face_data = {}  # Store previous frame data for stability
+class CV2AttendanceSystem:
+    def __init__(self):
+        # Initialize variables
+        self.db_dir = './db'
+        self.logs_dir = './logs'
+        self.known_faces_dir = './known_faces'
+        
+        # Create necessary directories
+        self.setup_directories()
+        
+        # Load known faces (using simple feature matching)
+        self.known_face_data = []  # Store (name, features) pairs
         self.load_known_faces()
         
-    def display_banner(self):
-        """Display professional application banner"""
-        banner = """
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║         SMART ATTENDANCE SYSTEM - PHASE 1                    ║
-    ║         Professional Face Detection & Recognition            ║
-    ║                                                              ║
-    ║         Developed during Vocational Training at OLF          ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
-        """
-        print(banner)
+        # Initialize camera
+        self.cap = cv2.VideoCapture(0)
+        self.current_frame = None
+        self.mode = "MAIN"  # MAIN, REGISTRATION
+        self.registration_emp_id = ""
+        
+        # Load face detector
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        
+        # Initialize feature detector
+        self.feature_detector = cv2.SIFT_create()
+        self.matcher = cv2.BFMatcher()
+        
+        print("=" * 60)
+        print("🚀 Smart Attendance System - Phase 2")
+        print("📷 OpenCV-Based Version - No External Dependencies")
+        print("=" * 60)
+        print("🎯 Controls:")
+        print("  A - Mark Attendance")
+        print("  L - Leaving from Office") 
+        print("  R - New Registration")
+        print("  Q - Quit")
+        print("=" * 60)
+
+    def setup_directories(self):
+        """Create necessary directories if they don't exist"""
+        os.makedirs(self.db_dir, exist_ok=True)
+        os.makedirs(self.logs_dir, exist_ok=True)
+        os.makedirs(self.known_faces_dir, exist_ok=True)
+        
+        print("✓ Directories verified:")
+        print(f"  - Database: {self.db_dir}")
+        print(f"  - Logs: {self.logs_dir}")
+        print(f"  - Known Faces: {self.known_faces_dir}")
+
+    def extract_face_features(self, face_image):
+        """Extract features from face image using SIFT"""
+        try:
+            # Convert to grayscale
+            gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
+            
+            # Detect keypoints and descriptors
+            keypoints, descriptors = self.feature_detector.detectAndCompute(gray, None)
+            
+            return descriptors
+        except Exception as e:
+            print(f"Feature extraction error: {e}")
+            return None
+
+    def compare_faces(self, descriptors1, descriptors2):
+        """Compare two face descriptors"""
+        if descriptors1 is None or descriptors2 is None:
+            return 0.0
+            
+        try:
+            # Match descriptors
+            matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
+            
+            # Apply ratio test
+            good_matches = []
+            for match_pair in matches:
+                if len(match_pair) == 2:
+                    m, n = match_pair
+                    if m.distance < 0.7 * n.distance:
+                        good_matches.append(m)
+            
+            # Calculate similarity score
+            similarity = len(good_matches) / max(len(descriptors1), len(descriptors2))
+            return min(similarity * 100, 100.0)
+            
+        except Exception as e:
+            return 0.0
 
     def load_known_faces(self):
-        """Load and encode known faces with professional logging"""
-        print("🎯 SMART ATTENDANCE SYSTEM - PHASE 1")
-        print("=" * 60)
-        print("🏢 Developed during Vocational Training at OLF")
-        print("📊 Loading known faces database...")
-        print("-" * 60)
-        
-        known_faces_dir = "known_faces"
-        loaded_count = 0
-        
-        # Create directories if they don't exist
-        os.makedirs(known_faces_dir, exist_ok=True)
-        os.makedirs("logs", exist_ok=True)
-        
-        # Check if known_faces directory has images
-        if not os.path.exists(known_faces_dir):
-            print("❌ CRITICAL: known_faces directory not found!")
-            return
-        
-        image_files = [f for f in os.listdir(known_faces_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
-        
-        if not image_files:
-            print("❌ No face images found in known_faces directory!")
-            print("💡 Please add face images as: known_faces/person_name.jpg")
-            return
-        
-        for image_file in image_files:
-            image_path = os.path.join(known_faces_dir, image_file)
-            try:
-                # Load image and find face encodings
-                image = face_recognition.load_image_file(image_path)
-                encodings = face_recognition.face_encodings(image)
-                
-                if encodings:
-                    self.known_face_encodings.append(encodings[0])
-                    name = os.path.splitext(image_file)[0].replace('_', ' ').title()
-                    self.known_face_names.append(name)
-                    print(f"✅ {name}")
-                    loaded_count += 1
-                else:
-                    print(f"❌ No face detected in: {image_file}")
+        """Load known faces from database"""
+        try:
+            pickle_files = [f for f in os.listdir(self.db_dir) if f.endswith('.pickle')]
+            
+            for file in pickle_files:
+                file_path = os.path.join(self.db_dir, file)
+                with open(file_path, 'rb') as f:
+                    face_data = pickle.load(f)
+                    self.known_face_data.append((file[:-7], face_data))  # Remove .pickle
                     
-            except Exception as e:
-                print(f"⚠️  Error loading {image_file}: {e}")
+            print(f"✓ Loaded {len(self.known_face_data)} known faces from database")
+            
+        except Exception as e:
+            print(f"✗ Error loading known faces: {e}")
+
+    def detect_faces(self, frame):
+        """Detect faces in frame using OpenCV"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=5, 
+            minSize=(30, 30)
+        )
+        return faces
+
+    def recognize_face(self, frame):
+        """Recognize face in the given frame"""
+        try:
+            # Detect faces
+            faces = self.detect_faces(frame)
+            
+            if len(faces) == 0:
+                return "no_persons_found", 0.0
+            
+            # Use the largest face (assuming it's the main person)
+            x, y, w, h = max(faces, key=lambda rect: rect[2] * rect[3])
+            face_roi = frame[y:y+h, x:x+w]
+            
+            # Extract features from current face
+            current_descriptors = self.extract_face_features(face_roi)
+            
+            if current_descriptors is None:
+                return "error", 0.0
+            
+            # Compare with known faces
+            best_match = None
+            best_confidence = 0.0
+            
+            for name, known_descriptors in self.known_face_data:
+                confidence = self.compare_faces(current_descriptors, known_descriptors)
+                if confidence > best_confidence and confidence > 40:  # 40% threshold
+                    best_confidence = confidence
+                    best_match = name
+            
+            if best_match:
+                return best_match, best_confidence
+            else:
+                return "unknown_person", 0.0
+            
+        except Exception as e:
+            print(f"Recognition error: {e}")
+            return "error", 0.0
+
+    def log_attendance(self, name, action):
+        """Log attendance with timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"{name}, {timestamp}, {action}\n"
         
-        print("-" * 60)
-        print(f"🎯 Database Ready: {loaded_count} faces loaded")
-        print("=" * 60)
+        log_file = os.path.join(self.logs_dir, "attendance_log.txt")
         
-        if loaded_count == 0:
-            print("❌ CRITICAL: No valid faces found in database")
+        try:
+            with open(log_file, 'a') as f:
+                f.write(log_entry)
+            print(f"✓ Attendance logged: {name} - {action} at {timestamp}")
+            return True
+        except Exception as e:
+            print(f"✗ Error logging attendance: {e}")
             return False
-        return True
 
-    def calculate_face_confidence(self, face_distance, face_match_threshold=0.6):
-        """
-        Calculate confidence percentage for face matches
-        This is the standard formula used in face recognition systems
-        """
-        if face_distance > face_match_threshold:
-            range_val = (1.0 - face_match_threshold)
-            linear_val = (1.0 - face_distance) / (range_val * 2.0)
-            return linear_val * 100
+    def draw_main_interface(self, frame):
+        """Draw the main interface with buttons"""
+        display_frame = frame.copy()
+        
+        # Draw header
+        cv2.rectangle(display_frame, (0, 0), (frame.shape[1], 60), (0, 0, 0), -1)
+        cv2.putText(display_frame, "Smart Attendance System - Phase 2", (20, 40),
+                   cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        
+        # Draw buttons
+        button_height = 80
+        button_width = 400
+        margin = 20
+        start_y = 100
+        
+        # Button 1: Mark Attendance
+        cv2.rectangle(display_frame, (margin, start_y), 
+                     (margin + button_width, start_y + button_height), (0, 255, 0), -1)
+        cv2.putText(display_frame, "Mark Attendance (Press A)", 
+                   (margin + 10, start_y + 50), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 0, 0), 2)
+        
+        # Button 2: Leaving from Office
+        cv2.rectangle(display_frame, (margin, start_y + button_height + margin), 
+                     (margin + button_width, start_y + 2*button_height + margin), (0, 0, 255), -1)
+        cv2.putText(display_frame, "Leaving from Office (Press L)", 
+                   (margin + 10, start_y + button_height + margin + 50), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Button 3: New Registration
+        cv2.rectangle(display_frame, (margin, start_y + 2*(button_height + margin)), 
+                     (margin + button_width, start_y + 3*button_height + 2*margin), (200, 200, 200), -1)
+        cv2.putText(display_frame, "New Registration (Press R)", 
+                   (margin + 10, start_y + 2*(button_height + margin) + 50), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 0, 0), 2)
+        
+        # Draw instructions
+        cv2.putText(display_frame, "Press Q to quit", 
+                   (frame.shape[1] - 200, frame.shape[0] - 20), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        return display_frame
+
+    def draw_registration_interface(self, frame):
+        """Draw the registration interface"""
+        display_frame = frame.copy()
+        
+        # Draw header
+        cv2.rectangle(display_frame, (0, 0), (frame.shape[1], 60), (0, 0, 0), -1)
+        cv2.putText(display_frame, "New Registration - Enter EMP_ID", (20, 40),
+                   cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        
+        # Draw instructions
+        cv2.putText(display_frame, "Please, Enter EMP_ID:", (50, 120),
+                   cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        
+        # Draw EMP ID box
+        cv2.rectangle(display_frame, (50, 150), (500, 220), (255, 255, 255), 2)
+        cv2.putText(display_frame, self.registration_emp_id, (60, 190),
+                   cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        
+        # Draw buttons
+        cv2.rectangle(display_frame, (50, 250), (250, 320), (0, 255, 0), -1)
+        cv2.putText(display_frame, "Accept (Press Enter)", (60, 290),
+                   cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 0, 0), 2)
+        
+        cv2.rectangle(display_frame, (300, 250), (500, 320), (0, 0, 255), -1)
+        cv2.putText(display_frame, "Try Again (Press ESC)", (310, 290),
+                   cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 2)
+        
+        return display_frame
+
+    def show_message(self, frame, title, message, duration=3000):
+        """Show a message overlay"""
+        display_frame = frame.copy()
+        
+        # Draw message box
+        box_height = 150
+        box_width = 600
+        start_x = (frame.shape[1] - box_width) // 2
+        start_y = (frame.shape[0] - box_height) // 2
+        
+        cv2.rectangle(display_frame, (start_x, start_y), 
+                     (start_x + box_width, start_y + box_height), (0, 0, 0), -1)
+        cv2.rectangle(display_frame, (start_x, start_y), 
+                     (start_x + box_width, start_y + box_height), (255, 255, 255), 2)
+        
+        # Draw title and message
+        cv2.putText(display_frame, title, (start_x + 20, start_y + 40),
+                   cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+        
+        # Split message if too long
+        if len(message) > 40:
+            parts = [message[i:i+40] for i in range(0, len(message), 40)]
+            for i, part in enumerate(parts):
+                cv2.putText(display_frame, part, (start_x + 20, start_y + 80 + i*30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         else:
-            range_val = (1.0 - face_match_threshold)
-            linear_val = (1.0 - face_distance) / (range_val * 2.0)
-            value = (linear_val + ((1.0 - linear_val) * np.power((linear_val - 0.5) * 2, 0.2))) * 100
-            return value
+            cv2.putText(display_frame, message, (start_x + 20, start_y + 80),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        
+        cv2.imshow('Smart Attendance System', display_frame)
+        cv2.waitKey(duration)
+        return frame
 
-    def draw_stable_bbox(self, frame, face_id, left, top, right, bottom, name, confidence):
-        """Draw stable bounding box that only updates text, not the entire box"""
-        # Generate a consistent color based on face_id for stability
-        color_seed = hash(face_id) % 5
-        colors = [(0, 255, 0), (0, 255, 255), (255, 255, 0), (255, 165, 0), (0, 191, 255)]
-        color = colors[color_seed]
-        
-        # Store current face data for stability
-        current_face_key = f"{left}_{top}"
-        
-        # Use previous position if available for smooth transitions
-        if current_face_key in self.previous_face_data:
-            prev_data = self.previous_face_data[current_face_key]
-            # Smooth position transition
-            left = int(0.7 * prev_data['left'] + 0.3 * left)
-            top = int(0.7 * prev_data['top'] + 0.3 * top)
-            right = int(0.7 * prev_data['right'] + 0.3 * right)
-            bottom = int(0.7 * prev_data['bottom'] + 0.3 * bottom)
-        
-        # Update stored data
-        self.previous_face_data[current_face_key] = {
-            'left': left, 'top': top, 'right': right, 'bottom': bottom,
-            'name': name, 'confidence': confidence
-        }
-        
-        # Draw main bounding box (consistent appearance)
-        cv2.rectangle(frame, (left, top), (right, bottom), color, 3)
-        
-        # Draw corner markers (consistent)
-        corner_length = 12
-        thickness = 2
-        
-        # Top-left corner
-        cv2.line(frame, (left, top), (left + corner_length, top), color, thickness)
-        cv2.line(frame, (left, top), (left, top + corner_length), color, thickness)
-        
-        # Top-right corner
-        cv2.line(frame, (right, top), (right - corner_length, top), color, thickness)
-        cv2.line(frame, (right, top), (right, top + corner_length), color, thickness)
-        
-        # Bottom-left corner
-        cv2.line(frame, (left, bottom), (left + corner_length, bottom), color, thickness)
-        cv2.line(frame, (left, bottom), (left, bottom - corner_length), color, thickness)
-        
-        # Bottom-right corner
-        cv2.line(frame, (right, bottom), (right - corner_length, bottom), color, thickness)
-        cv2.line(frame, (right, bottom), (right, bottom - corner_length), color, thickness)
-        
-        # Draw name background (static size to prevent flickering)
-        label_bg_height = 35
-        label_bg_top = top - label_bg_height
-        label_bg_bottom = top
-        label_bg_left = left
-        label_bg_right = left + 200  # Fixed width to prevent resizing
-        
-        # Draw background
-        cv2.rectangle(frame, (label_bg_left, label_bg_top), 
-                     (label_bg_right, label_bg_bottom), color, -1)
-        
-        # Prepare text (only this changes)
-        if name == "Unknown":
-            label = f"UNKNOWN {confidence:.1f}%"
-            text_color = (255, 255, 255)
-        else:
-            label = f"{name} {confidence:.1f}%"
-            text_color = (0, 0, 0)  # Black text for better readability
-        
-        # Add text with shadow for better readability
-        cv2.putText(frame, label, (left + 8, top - 12), 
-                   cv2.FONT_HERSHEY_DUPLEX, 0.6, (0, 0, 0), 2)  # Shadow
-        cv2.putText(frame, label, (left + 8, top - 12), 
-                   cv2.FONT_HERSHEY_DUPLEX, 0.6, text_color, 1)  # Main text
+    def handle_registration_input(self, key):
+        """Handle keyboard input during registration"""
+        if key == 13:  # Enter key
+            if self.registration_emp_id.strip():
+                self.complete_registration()
+            else:
+                self.show_message(self.current_frame, "Error", "Please enter EMP_ID")
+        elif key == 27:  # ESC key
+            self.mode = "MAIN"
+            self.registration_emp_id = ""
+        elif key == 8:  # Backspace
+            self.registration_emp_id = self.registration_emp_id[:-1]
+        elif 48 <= key <= 57:  # Numbers 0-9
+            self.registration_emp_id += chr(key)
+        elif 65 <= key <= 90 or 97 <= key <= 122:  # Letters A-Z, a-z
+            self.registration_emp_id += chr(key)
 
-    def display_system_info(self, frame, fps, faces_detected, recognized_faces):
-        """Display professional system information overlay"""
-        # Main header background
-        cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 0), -1)
-        
-        # System title
-        title = "Smart Attendance System - Phase 1 | OLF Vocational Training"
-        cv2.putText(frame, title, (10, 25), 
-                   cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
-        
-        # Status information on right side
-        status_text = f"FPS: {fps:.1f} | Faces: {faces_detected} | Recognized: {recognized_faces}"
-        text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-        cv2.putText(frame, status_text, (frame.shape[1] - text_size[0] - 10, 25), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Footer with instructions
-        footer_bg = frame.shape[0] - 30
-        cv2.rectangle(frame, (0, footer_bg), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
-        instruction = "Press 'Q' to exit system | Real-time Face Recognition Active"
-        cv2.putText(frame, instruction, (10, frame.shape[0] - 10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    def complete_registration(self):
+        """Complete the registration process"""
+        try:
+            # Detect faces
+            faces = self.detect_faces(self.current_frame)
+            
+            if len(faces) == 0:
+                self.show_message(self.current_frame, "Error", "No face detected. Please try again.")
+                return
+            
+            # Use the largest face
+            x, y, w, h = max(faces, key=lambda rect: rect[2] * rect[3])
+            face_roi = self.current_frame[y:y+h, x:x+w]
+            
+            # Extract features
+            descriptors = self.extract_face_features(face_roi)
+            
+            if descriptors is None:
+                self.show_message(self.current_frame, "Error", "Could not extract face features.")
+                return
+            
+            # Save features to database
+            encoding_file = os.path.join(self.db_dir, f"{self.registration_emp_id}.pickle")
+            with open(encoding_file, 'wb') as f:
+                pickle.dump(descriptors, f)
+            
+            # Save original image for reference
+            image_file = os.path.join(self.known_faces_dir, f"{self.registration_emp_id}.jpg")
+            cv2.imwrite(image_file, self.current_frame)
+            
+            # Reload known faces
+            self.load_known_faces()
+            
+            self.show_message(self.current_frame, "Success!", f"User {self.registration_emp_id} registered successfully!")
+            self.mode = "MAIN"
+            self.registration_emp_id = ""
+            
+        except Exception as e:
+            self.show_message(self.current_frame, "Registration Error", f"Error: {str(e)}")
 
-    def test_camera_access(self):
-        """Test camera access before starting main loop"""
-        print("📷 Testing camera access...")
-        for i in range(3):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret:
-                    print(f"✅ Camera {i} is working!")
-                    cap.release()
-                    return i
-                cap.release()
-            print(f"❌ Camera {i} not accessible")
+    def run(self):
+        """Main application loop"""
+        print("🚀 Starting face recognition system...")
         
-        print("❌ No working camera found!")
-        return None
-
-    def improve_recognition_accuracy(self, face_encoding):
-        """Enhanced recognition with better matching logic"""
-        if not self.known_face_encodings:
-            return "Unknown", 0.0
-        
-        # Calculate face distances
-        face_distances = face_recognition.face_distance(self.known_face_encodings, face_encoding)
-        
-        # Find the best match
-        best_match_index = np.argmin(face_distances)
-        best_distance = face_distances[best_match_index]
-        
-        # Calculate confidence using standard formula
-        confidence = self.calculate_face_confidence(best_distance)
-        
-        # Apply recognition threshold
-        if confidence > 85:  # 85% confidence threshold
-            return self.known_face_names[best_match_index], confidence
-        else:
-            return "Unknown", confidence
-
-    def run_recognition(self, demo_mode=False):
-        """Main recognition loop with stable face tracking"""
-        print("🚀 Starting Real-time Face Recognition System")
-        
-        # Test camera first
-        working_camera = self.test_camera_access()
-        if working_camera is None:
-            print("💡 Camera Troubleshooting:")
-            print("1. Check if camera is connected")
-            print("2. Grant camera permissions to Terminal")
-            print("3. Close other apps using camera")
-            print("4. Try different camera index: python main.py --camera 1")
+        if not self.cap.isOpened():
+            print("❌ Error: Could not access camera")
             return
         
-        # Use the working camera index
-        self.camera_index = working_camera
-        
-        print("📷 Initializing camera...")
-        
-        # Initialize camera with optimal settings
-        cap = cv2.VideoCapture(self.camera_index)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-        
-        if not cap.isOpened():
-            print("❌ Camera initialization failed")
-            return
-        
-        print("✅ Camera ready")
-        print("🎬 Starting recognition loop...")
-        print("=" * 60)
-        print("💡 Face the camera and ensure good lighting")
-        print("🎯 System will identify you in real-time")
-        print("=" * 60)
-        
-        frame_count = 0
-        start_time = time.time()
+        print("✅ Camera initialized successfully")
         
         try:
             while True:
-                ret, frame = cap.read()
+                ret, frame = self.cap.read()
                 if not ret:
-                    print("❌ Frame capture failed")
+                    print("❌ Error: Could not read frame from camera")
                     break
                 
-                # Mirror the frame for more natural interaction
+                # Flip frame for mirror effect
                 frame = cv2.flip(frame, 1)
+                self.current_frame = frame
                 
-                # Initialize variables for this frame
-                face_locations = []
-                face_names = []
-                face_confidences = []
-                recognized_count = 0
+                # Draw appropriate interface
+                if self.mode == "MAIN":
+                    display_frame = self.draw_main_interface(frame)
+                elif self.mode == "REGISTRATION":
+                    display_frame = self.draw_registration_interface(frame)
                 
-                # Process every other frame for performance
-                frame_count += 1
-                if frame_count % 2 == 0:
-                    # Resize for faster processing while maintaining quality
-                    small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-                    rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Detect face locations and encodings
-                    face_locations = face_recognition.face_locations(rgb_small_frame)
-                    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-                    
-                    for i, face_encoding in enumerate(face_encodings):
-                        # Use enhanced recognition
-                        name, confidence = self.improve_recognition_accuracy(face_encoding)
-                        
-                        face_names.append(name)
-                        face_confidences.append(confidence)
-                        
-                        if name != "Unknown":
-                            recognized_count += 1
-                    
-                    # Draw stable bounding boxes
-                    for (top, right, bottom, left), name, confidence in zip(face_locations, face_names, face_confidences):
-                        # Scale back up face locations
-                        top *= 2; right *= 2; bottom *= 2; left *= 2
-                        
-                        # Create unique face ID for consistent tracking
-                        face_id = f"face_{left}_{top}"
-                        
-                        self.draw_stable_bbox(frame, face_id, left, top, right, bottom, name, confidence)
+                # Show the frame
+                cv2.imshow('Smart Attendance System', display_frame)
                 
-                # Clean up old face data to prevent memory leaks
-                if frame_count % 50 == 0:
-                    self.previous_face_data.clear()
+                # Handle keyboard input
+                key = cv2.waitKey(1) & 0xFF
                 
-                # Calculate FPS
-                current_time = time.time()
-                fps = frame_count / (current_time - start_time) if (current_time - start_time) > 0 else 0
-                
-                # Display professional system overlay
-                self.display_system_info(frame, fps, len(face_locations), recognized_count)
-                
-                # Show frame
-                cv2.imshow('Smart Attendance System - Phase 1 | OLF Vocational Training', frame)
-                
-                # Exit on 'q' press
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if key == ord('q') or key == ord('Q'):
                     print("⏹️  System shutdown initiated...")
                     break
-                    
+                
+                if self.mode == "MAIN":
+                    if key == ord('a') or key == ord('A'):
+                        self.mark_attendance()
+                    elif key == ord('l') or key == ord('L'):
+                        self.leaving_office()
+                    elif key == ord('r') or key == ord('R'):
+                        self.mode = "REGISTRATION"
+                        self.registration_emp_id = ""
+                        print("📝 Registration mode activated")
+                
+                elif self.mode == "REGISTRATION":
+                    self.handle_registration_input(key)
+                        
         except KeyboardInterrupt:
-            print("⏹️  System interrupted by user")
+            print("\n⏹️  System interrupted by user")
         except Exception as e:
             print(f"❌ System error: {e}")
         finally:
-            cap.release()
-            cv2.destroyAllWindows()
-            print("✅ Camera resources released")
-            print("🎉 System shutdown complete")
-            print("=" * 60)
+            self.cleanup()
+
+    def mark_attendance(self):
+        """Handle mark attendance"""
+        name, confidence = self.recognize_face(self.current_frame)
+        
+        if name == "no_persons_found":
+            self.show_message(self.current_frame, "No Face Detected", 
+                            "No face detected. Please ensure your face is visible.")
+        elif name == "unknown_person":
+            self.show_message(self.current_frame, "Unknown User", 
+                            "Unknown user. Please register or try again.")
+        elif name == "error":
+            self.show_message(self.current_frame, "Recognition Error", 
+                            "Face recognition error. Please try again.")
+        else:
+            if self.log_attendance(name, "IN"):
+                self.show_message(self.current_frame, "Welcome Back!", 
+                                f"Welcome, {name}!\nConfidence: {confidence:.1f}%")
+
+    def leaving_office(self):
+        """Handle leaving office"""
+        name, confidence = self.recognize_face(self.current_frame)
+        
+        if name == "no_persons_found":
+            self.show_message(self.current_frame, "No Face Detected", 
+                            "No face detected. Please ensure your face is visible.")
+        elif name == "unknown_person":
+            self.show_message(self.current_frame, "Unknown User", 
+                            "Unknown user. Please register or try again.")
+        elif name == "error":
+            self.show_message(self.current_frame, "Recognition Error", 
+                            "Face recognition error. Please try again.")
+        else:
+            if self.log_attendance(name, "OUT"):
+                self.show_message(self.current_frame, "Goodbye!", 
+                                f"Goodbye, {name}!\nConfidence: {confidence:.1f}%")
+
+    def cleanup(self):
+        """Cleanup resources"""
+        self.cap.release()
+        cv2.destroyAllWindows()
+        print("✅ Camera resources released")
+        print("🎉 System shutdown complete")
+        print("=" * 60)
 
 
 def main():
-    """
-    Main function to run the enhanced face recognition system
-    """
-    parser = argparse.ArgumentParser(
-        description='Smart Attendance System - Phase 1: Professional Face Detection Module'
-    )
-    parser.add_argument('--demo', action='store_true',
-                       help='Run in demo mode (for testing)')
-    parser.add_argument('--camera', type=int, default=0,
-                       help='Camera index (0 for default, 1 for external)')
-    
-    args = parser.parse_args()
-    
-    # Display professional banner
-    system = ProfessionalFaceRecognition(camera_index=args.camera)
-    system.display_banner()
-    
-    print("🚀 Initializing Smart Attendance System...")
-    print("📍 Phase 1: Professional Face Detection Module")
-    print("🏢 Developed during Vocational Training at OLF")
-    print("=" * 60)
-    
-    if args.demo:
-        print("🔧 Running in DEMO mode...")
-    
-    if args.camera != 0:
-        print(f"📷 Using camera index: {args.camera}")
-    
+    """Main function to start the application"""
     try:
-        # Initialize and run enhanced face recognition system
-        print("🔄 Starting enhanced face recognition system...")
-        system.run_recognition(demo_mode=args.demo)
-        
-    except KeyboardInterrupt:
-        print("\n⏹️  Application stopped by user.")
+        app = CV2AttendanceSystem()
+        app.run()
     except Exception as e:
-        print(f"❌ Error running application: {e}")
-        sys.exit(1)
-    finally:
-        print("\n👋 Thank you for using Smart Attendance System!")
-        print("📍 Phase 1 - Professional Face Detection Complete")
-        print("🎯 Ready for Phase 2: Database Integration & Web Interface")
+        print(f"❌ Failed to start application: {e}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

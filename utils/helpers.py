@@ -4,98 +4,81 @@ Phase 1 - Smart Attendance System
 Developed during Vocational Training at OLF
 """
 
-import math
-import datetime
-import cv2
-import numpy as np
 import os
+import pickle
+import tkinter as tk
+from tkinter import messagebox
+import face_recognition
+import cv2
 
+def get_button(window, text, color, command, fg='white', width=20):
+    button = tk.Button(
+        window,
+        text=text,
+        activebackground="black",
+        activeforeground="white",
+        fg=fg,
+        bg=color,
+        command=command,
+        height=2,
+        width=width,
+        font=('Helvetica bold', 16)
+    )
+    return button
 
-def calculate_face_confidence(face_distance, face_match_threshold=0.6):
-    """
-    Calculate confidence percentage for face matches
-    """
-    range_val = (1.0 - face_match_threshold)
-    linear_val = (1.0 - face_distance) / (range_val * 2.0)
+def get_img_label(window):
+    label = tk.Label(window, bg="black")
+    label.grid(row=0, column=0)
+    return label
 
-    if face_distance > face_match_threshold:
-        return str(round(linear_val * 100, 2)) + '%'
+def get_text_label(window, text):
+    label = tk.Label(window, text=text, bg="black", fg="white")
+    label.config(font=("sans-serif", 16), justify="left")
+    return label
+
+def get_entry_text(window):
+    inputtxt = tk.Text(
+        window,
+        height=2,
+        width=20,
+        font=("Arial", 16)
+    )
+    return inputtxt
+
+def msg_box(title, description):
+    messagebox.showinfo(title, description)
+
+def recognize(img, db_path):
+    embeddings_unknown = face_recognition.face_encodings(img)
+    if len(embeddings_unknown) == 0:
+        return 'no_persons_found'
     else:
-        value = (linear_val + ((1.0 - linear_val) * 
-                 math.pow((linear_val - 0.5) * 2, 0.2))) * 100
-        return str(round(value, 2)) + '%'
+        embeddings_unknown = embeddings_unknown[0]
 
-
-def setup_directories():
-    """Create necessary directories if they don't exist"""
-    from config import KNOWN_FACES_DIR, LOG_DIR
+    db_dir = sorted(os.listdir(db_path))
+    match = False
+    j = 0
     
-    os.makedirs(KNOWN_FACES_DIR, exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
-    
-    print(f"Directories verified:")
-    print(f"- Known faces: {KNOWN_FACES_DIR}")
-    print(f"- Logs: {LOG_DIR}")
+    while not match and j < len(db_dir):
+        path_ = os.path.join(db_path, db_dir[j])
+        file = open(path_, 'rb')
+        embeddings = pickle.load(file)
+        match = face_recognition.compare_faces([embeddings], embeddings_unknown)[0]
+        j += 1
 
+    if match:
+        return db_dir[j-1][:-7]  # Remove .pickle extension
+    else:
+        return 'unknown_person'
 
-def log_attendance(name, log_path):
-    """
-    Log attendance with timestamp to file
-    """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f'{name}, {timestamp}, Attendance marked!\n'
-    
-    try:
-        with open(log_path, 'a') as f:
-            f.write(log_entry)
-        print(f"✓ Attendance logged for: {name} at {timestamp}")
-    except Exception as e:
-        print(f"✗ Error logging attendance: {e}")
-
-
-def draw_face_annotations(frame, face_locations, face_names, scale_factor=4):
-    """
-    Draw bounding boxes and names on detected faces
-    """
-    # Use default colors instead of importing from config to avoid circular imports
-    bbox_color = (0, 0, 255)  # Red
-    text_color = (255, 255, 255)  # White
-    
-    for (top, right, bottom, left), name in zip(face_locations, face_names):
-        # Scale coordinates back to original frame size
-        top = int(top * scale_factor)
-        right = int(right * scale_factor)
-        bottom = int(bottom * scale_factor)
-        left = int(left * scale_factor)
-
-        # Draw bounding box around face
-        cv2.rectangle(frame, (left, top), (right, bottom), bbox_color, 2)
+def draw_face_boxes(image, face_locations, names):
+    """Draw bounding boxes around faces and display names"""
+    for (top, right, bottom, left), name in zip(face_locations, names):
+        # Draw box around face
+        cv2.rectangle(image, (left, top), (right, bottom), (0, 255, 0), 2)
         
-        # Draw background rectangle for name
-        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), 
-                     bbox_color, cv2.FILLED)
-        
-        # Draw name and confidence text
-        cv2.putText(frame, name, (left + 6, bottom - 6), 
-                   cv2.FONT_HERSHEY_DUPLEX, 0.8, text_color, 1)
+        # Draw label with name
+        cv2.rectangle(image, (left, bottom - 35), (right, bottom), (0, 255, 0), cv2.FILLED)
+        cv2.putText(image, name, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
     
-    return frame
-
-
-def validate_known_faces(known_faces_dir):
-    """
-    Validate known faces directory and images
-    """
-    valid_extensions = ('.png', '.jpg', '.jpeg')
-    image_files = []
-    
-    if not os.path.exists(known_faces_dir):
-        print(f"✗ Known faces directory not found: {known_faces_dir}")
-        return image_files
-    
-    for file in os.listdir(known_faces_dir):
-        if file.lower().endswith(valid_extensions):
-            image_files.append(file)
-    
-    print(f"✓ Found {len(image_files)} valid face images")
-    return image_files
+    return image

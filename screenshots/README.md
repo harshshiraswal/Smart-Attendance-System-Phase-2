@@ -3,13 +3,16 @@
 ## System Workflow
 
 ### 1. System Initialization
-![Terminal Startup](terminal_start.png)
+![Terminal Startup](terminal_Start.png)
 *System loads face database, initializes camera, and prepares for recognition*
 
-### 2. Real-time Recognition  
-![Face Detection](recognition_working_1.png)
-![Face Detection](recognition_working_2.png)
-![Face Detection](recognition_working_3.png)
+### 2. Real-time Registeration & Recognition  
+![System Initialization](system_initialization.png)
+![New User Registration](new_user_registration.png)
+![Entering New Emp ID](entering_new_emp_id.png)
+![Successful Registration](successful_registration.png)
+![Marking Attendance](marking_attendance.png)
+![Leaving Office](leaving_office.png)
 *Live face recognition with confidence scoring and professional UI overlay*
 
 ### 3. System Shutdown
@@ -35,6 +38,6 @@
 
 ---
 
-*Smart Attendance System - Phase 1*  
+*Smart Attendance System - Phase 2*  
 *Developed during Vocational Training at OLF*  
 *Face Detection and Recognition Module*
